@@ -1,12 +1,15 @@
 use bust::probability_bust;
+use new_probs::{calc_score, enumerate_histogram_probabilities, evaluate_histogram, print_histogram_ev, print_score_distribution};
+use render::{color_for_faces, render_probability_image_216_from_counts};
 use straights::{print_straight_breakdown, straight_terms_exclusive};
 
 mod bust;
 mod straights;
+mod render;
+mod new_probs;
 
 #[derive(Clone)]
 pub struct Die {
-    //weights: [u32; 6],
     probs: [f64; 6],
     name: String,
     pub is_devil: bool,
@@ -101,32 +104,34 @@ pub struct EvTerm {
 /// - each additional die after 3 doubles the value (4x = 2×, 5x = 4×, 6x = 8×)
 ///
 /// This assumes scoring is additive across faces (true here since we ignore straights/jokers).
-pub fn expected_first_roll_score(
-    dice: &[Die],
-    counts: &[u8],
-) -> f64 {
+/// Expected score of the *first roll* (one throw of 6 dice),
+/// computed exactly via histogram enumeration (order-independent),
+/// using the full `calc_score` logic (including straights etc.).
+pub fn expected_first_roll_score(dice_types: &[Die], counts_by_type: &[u8]) -> f64 {
     debug_assert_eq!(
-        counts.iter().map(|&c| c as usize).sum::<usize>(),
+        counts_by_type.iter().map(|&c| c as usize).sum::<usize>(),
         6,
         "counts must sum to 6 dice"
     );
 
-    let mut total_ev = 0.0;
+    let hist = enumerate_histogram_probabilities(dice_types, counts_by_type);
 
-    for face in 0..6 {
-        for target in 0..=6 {
-            let s = score_for_face_count(face, target);
-            if s == 0 {
-                continue;
-            }
+    let mut ev = 0.0;
+    for (counts_u8, p) in hist {
+        let counts_usize: [usize; 6] = [
+            counts_u8[0] as usize,
+            counts_u8[1] as usize,
+            counts_u8[2] as usize,
+            counts_u8[3] as usize,
+            counts_u8[4] as usize,
+            counts_u8[5] as usize,
+        ];
 
-            let p = probability_exact(dice, counts, face, target);
-            let ev = p * s as f64;
-            total_ev += ev;
-        }
+        let score = calc_score(&counts_usize) as f64;
+        ev += p * score;
     }
 
-    total_ev
+    ev
 }
 
 /// Score contributed by a single face (0..5 == 1..6) given that it appears `count` times in the roll.
@@ -276,19 +281,6 @@ pub fn evaluate_and_print(dice_types: &[Die], counts: &[u8]) {
     println!("---------------------------------------------");
 }
 
-pub fn calculate_dice_score(dice_types: &[Die], counts: &[u8]) -> f64{
-
-    let base_ev =
-        expected_first_roll_score(dice_types, counts);
-
-    // Straight EV (exclusive, no double counting)
-    let straight_terms = straight_terms_exclusive(dice_types, counts);
-    let straight_ev: f64 = straight_terms.iter().map(|t| t.ev).sum();
-
-    // Total EV including straights
-    let total_ev = base_ev + straight_ev;
-    return total_ev;
-}
 
 
 /// Finds the best multiset of exactly 6 dice from the available types with per-type limits.
@@ -319,7 +311,7 @@ pub fn find_best_dice_set(
     ) {
         if i == dice.len() {
             if remaining == 0 {
-                let score = calculate_dice_score(dice, current);
+                let score = expected_first_roll_score(dice, current);
                 if score > *best_score {
                     *best_score = score;
                     best_counts.copy_from_slice(current);
@@ -388,48 +380,262 @@ pub fn selection_from_counts(
     (dice_types, counts)
 }
 
+
+
 fn main() {
-    let default_die = Die::new([1, 1, 1, 1, 1, 1], "Default".to_string());
-    let arranka_die = Die::new([6, 1, 6, 1, 6, 1], "Arranka".to_string());
-    let unbalanced_die = Die::new([3, 4, 1, 1, 2, 1], "Unbalanced".to_string());
-    let trinity_die = Die::new([4, 5, 10, 1, 1, 1], "Trinity".to_string());
-    let misforutne_die = Die::new([1, 5, 5, 5, 5, 1], "Misfortune".to_string());
-    let stahovacka_die = Die::new([2, 1, 1, 1, 1, 3], "Stahovacka".to_string());
-    let lucifer_die = Die::new([1,1,1,1,1,2], "Lucifer".to_string());
-    let weighted_die = Die::new([10,1,1,1,1,1], "Weighted".to_string());
-let cautious_cheater_die = Die::new(
-    [5, 3, 2, 3, 5, 3],
-    "C_Cheater".to_string()
-);
-    let odd_die = Die::new(
-    [4, 1, 4, 1, 4, 1],
-    "Odd".to_string(),
-);
 
-    let available_dice = [default_die.clone(), trinity_die.clone(), arranka_die.clone(), unbalanced_die.clone(),misforutne_die.clone(),  stahovacka_die.clone(), lucifer_die.clone(), cautious_cheater_die.clone(), odd_die.clone(), Die::devil(), weighted_die.clone()];
-    let available_dice_count = [6, 2, 1,1,1,1,1,1,1,0,1];
+    //println!("{:?}", color_for_faces(&[0,1,2,3,3,3],255));
 
-    let (best_score, best_counts) = find_best_dice_set(&available_dice, &available_dice_count);
+
+
+    //return;
+let aranka_die = Die::new([6,1,6,1,6,1], "Aranka's die".to_string());
+let cautious_cheaters_die = Die::new([5,3,2,3,5,3], "Cautious cheater's die".to_string());
+let lu_ci_die = Die::new([3,3,3,3,3,6], "Lu/Ci die".to_string());
+//let devils_head_die = Die::devil();
+let die_of_misfortune = Die::new([1,5,5,5,5,1], "Die of misfortune".to_string());
+let even_die = Die::new([2,8,2,8,2,8], "Even die".to_string());
+let favourable_die = Die::new([6,0,1,1,6,4], "Favourable die".to_string());
+let fer_die = Die::new([3,3,3,3,3,5], "Fer die".to_string());
+let greasy_die = Die::new([3,2,3,2,3,4], "Greasy die".to_string());
+let grimy_die = Die::new([1,5,1,1,7,1], "Grimy die".to_string());
+let grozavs_lucky_die = Die::new([1,10,1,1,1,1], "Grozav's lucky die".to_string());
+let heavenly_kingdom_die = Die::new([7,2,2,2,2,4], "Heavenly Kingdom die".to_string());
+let holy_trinity_die = Die::new([4,5,7,1,1,1], "Holy Trinity die".to_string());
+//let hugos_die = Die::new([1,1,1,1,1,1], "Hugo's Die".to_string());
+let kings_die = Die::new([4,6,7,8,4,3], "King's die".to_string());
+let lousy_gamblers_die = Die::new([2,3,2,3,7,3], "Lousy gambler's die".to_string());
+//let lu_die = Die::new([3,3,3,3,3,6], "Lu die".to_string());
+let lucky_die = Die::new([6,1,2,3,4,6], "Lucky Die".to_string());
+let mathematicians_die = Die::new([4,5,6,7,1,1], "Mathematician's Die".to_string());
+//let molar_die = Die::new([1,1,1,1,1,1], "Molar die".to_string());
+let mother_of_pearl_die = Die::new([3,1,1,1,3,3], "Mother-of-pearl die".to_string());
+let odd_die = Die::new([8,2,8,2,8,2], "Odd die".to_string());
+let ordinary_die = Die::new([1,1,1,1,1,1], "Ordinary die".to_string());
+let painted_die = Die::new([3,1,1,1,6,3], "Painted die".to_string());
+let painters_die = Die::new([1,3,2,2,2,1], "Painter's die".to_string());
+let pie_die = Die::new([6,1,3,3,0,0], "Pie die".to_string());
+//let premolar_die = Die::new([1,1,1,1,1,1], "Premolar die".to_string());
+let sad_greasers_die = Die::new([6,6,1,1,6,3], "Sad Greaser's Die".to_string());
+let saint_antiochus_die = Die::new([3,1,6,1,1,3], "Saint Antiochus' die".to_string());
+let shrinking_die = Die::new([2,1,1,1,1,3], "Shrinking die".to_string());
+//let st_stephens_die = Die::new([1,1,1,1,1,1], "St. Stephen's die".to_string());
+let strip_die = Die::new([4,2,2,2,3,3], "Strip die".to_string());
+let three_die = Die::new([2,1,4,1,2,1], "Three die".to_string());
+let unbalanced_die = Die::new([3,4,1,1,2,1], "Unbalanced Die".to_string());
+let unlucky_die = Die::new([1,3,2,2,2,1], "Unlucky die".to_string());
+let wagoners_die = Die::new([1,5,6,2,2,2], "Wagoner's Die".to_string());
+let weighted_die = Die::new([10,1,1,1,1,1], "Weighted die".to_string());
+//let wisdom_tooth_die = Die::new([1,1,1,1,1,1], "Wisdom tooth die".to_string());
+
+
+//     let all_dice_with_counts = vec![
+//     (aranka_die, 1),
+//     (cautious_cheaters_die, 1),
+//     //(ci_die, 1),
+//     //(devils_head_die, 1),
+//     //(die_of_misfortune, 1),
+//     //(even_die, 1),
+//     (favourable_die, 6),
+//     //(fer_die, 1),
+//     //(greasy_die, 1),
+//     //(grimy_die, 1),
+//     //(grozavs_lucky_die, 1),
+//     (heavenly_kingdom_die, 1),
+//     (holy_trinity_die, 1),
+//     (kings_die, 1),
+//     //(lousy_gamblers_die, 1),
+//     //(lu_die, 1),
+//     (lucky_die, 1),
+//     (mathematicians_die, 1),
+//     (mother_of_pearl_die, 1),
+//     (odd_die, 6),
+//     //(ordinary_die.clone(), 1),
+//     //(painted_die, 1),
+//     //(painters_die, 3),
+//     (pie_die, 6),
+//     //(premolar_die, 1),
+//     (sad_greasers_die, 1),
+//     //(saint_antiochus_die, 1),
+//     (shrinking_die, 1),
+//     //(st_stephens_die, 1),
+//     //(strip_die, 1),
+//     //(three_die, 1),
+//     (unbalanced_die, 1),
+//     //(unlucky_die, 1),
+//     //(wagoners_die, 1),
+//     (weighted_die, 1),
+//     //(wisdom_tooth_die, 1),
+// ];
+
+
+
+    let all_dice_with_counts = vec![
+    (aranka_die, 1),
+    (cautious_cheaters_die, 1),
+    //(ci_die, 1),
+    //(devils_head_die, 1),
+    //(die_of_misfortune, 1),
+    //(even_die, 1),
+    (favourable_die, 1),
+    //(fer_die, 1),
+    //(greasy_die, 1),
+    //(grimy_die, 1),
+    //(grozavs_lucky_die, 1),
+    //(heavenly_kingdom_die, 1),
+    (holy_trinity_die, 3),
+    //(kings_die, 1),
+    //(lousy_gamblers_die, 1),
+    //(lu_die, 1),
+    //(lucky_die, 1),
+    //(mathematicians_die, 1),
+    //(mother_of_pearl_die, 1),
+    (odd_die, 3),
+    //(ordinary_die.clone(), 1),
+    //(painted_die, 1),
+    //(painters_die, 3),
+    //(pie_die, 1),
+    //(sad_greasers_die, 1),
+    //(saint_antiochus_die, 1),
+    (shrinking_die, 2),
+    //(st_stephens_die, 1),
+    //(strip_die, 1),
+    //(three_die, 1),
+    (unbalanced_die, 1),
+    (unlucky_die, 1),
+    (wagoners_die, 1),
+    (weighted_die, 1),
+    //(wisdom_tooth_die, 1),
+];
+
+
+
+//       let all_dice_with_counts = vec![
+//     //(aranka_die, 1),
+//     //(cautious_cheaters_die, 1),
+//     (lu_ci_die, 6),
+//     //(devils_head_die, 1),
+//     (die_of_misfortune, 6),
+//     (even_die, 6),
+//     //(favourable_die, 6),
+//     (fer_die, 6),
+//     (greasy_die, 1),
+//     (grimy_die, 1),
+//     (grozavs_lucky_die, 6),
+//     //(heavenly_kingdom_die, 1),
+//     (holy_trinity_die, 6),
+//     //(kings_die, 1),
+//     (lousy_gamblers_die, 1),
+//     (lucky_die, 1),
+//     (mathematicians_die, 6),
+//     (mother_of_pearl_die, 1),
+//     (odd_die, 6),
+//     //(ordinary_die.clone(), 1),
+//     (painted_die, 1),
+//     (painters_die, 3),
+//     (pie_die, 6),
+//     (sad_greasers_die, 1),
+//     (saint_antiochus_die, 1),
+//     (shrinking_die, 1),
+//     //(st_stephens_die, 1),
+//     (strip_die, 1),
+//     (three_die, 1),
+//     (unbalanced_die, 1),
+//     (unlucky_die, 1),
+//     (wagoners_die, 6),
+//     (weighted_die, 1),
+//     //(wisdom_tooth_die, 1),
+// ];
+
+
+
+//
+//     let all_dice_with_counts = vec![
+//     //(aranka_die, 1),
+//     //(cautious_cheaters_die, 1),
+//     //(ci_die, 1),
+//     //(devils_head_die, 1),
+//     //(die_of_misfortune, 1),
+//     //(even_die, 1),
+//     (favourable_die, 6),
+//     //(fer_die, 1),
+//     //(greasy_die, 1),
+//     //(grimy_die, 1),
+//     //(grozavs_lucky_die, 1),
+//     //(heavenly_kingdom_die, 1),
+//     //(holy_trinity_die, 1),
+//     //(kings_die, 1),
+//     //(lousy_gamblers_die, 1),
+//     //(lu_die, 1),
+//     //(lucky_die, 1),
+//     //(mathematicians_die, 1),
+//     //(mother_of_pearl_die, 1),
+//     //(odd_die, 6),
+//     //(ordinary_die.clone(), 1),
+//     //(painted_die, 1),
+//     //(painters_die, 3),
+//     //(pie_die, 6),
+//     //(premolar_die, 1),
+//     //(sad_greasers_die, 1),
+//     //(saint_antiochus_die, 1),
+//     //(shrinking_die, 1),
+//     //(st_stephens_die, 1),
+//     //(strip_die, 1),
+//     //(three_die, 1),
+//     //(unbalanced_die, 1),
+//     //(unlucky_die, 1),
+//     //(wagoners_die, 1),
+//     (weighted_die, 1),
+//     //(wisdom_tooth_die, 1),
+// ];
+
+    let (all_dice, all_dice_counts): (Vec<Die>, Vec<u8>) =
+    all_dice_with_counts.into_iter().unzip();
+
+
+//    let available_dice = [default_die.clone(), holy_trinity_die.clone(), aranka_die.clone(), unbalanced_die.clone(),die_of_misfortune.clone(),  shrinking_die.clone(), lu_die.clone(), cautious_cheaters_die.clone(), odd_die.clone(), Die::devil(), weighted_die.clone(), painted_die.clone()];
+//    let available_dice_count = [6, 4, 1,1,1,3,1,1,3,0,1,1];
+
+
+
+    let (best_score, best_counts) = find_best_dice_set(&all_dice, &all_dice_counts);
 
     println!(
         "Best = {:.2}  ({})",
         best_score,
-        format_dice_set(&available_dice, &best_counts)
+        format_dice_set(&all_dice, &best_counts)
     );
 
+let (dice_types, counts) =  selection_from_counts(&all_dice, &best_counts);
+    let hist = enumerate_histogram_probabilities(&dice_types, &counts);
+    print_score_distribution(&hist);
+evaluate_histogram(&dice_types, &counts);
+
+        let hist = enumerate_histogram_probabilities(&[ordinary_die.clone()], &[6]);
+    print_score_distribution(&hist);
+
+
+
+    /*
 let (dice_types, counts) =
     selection_from_counts(&available_dice, &best_counts);
      evaluate_and_print(&dice_types, &counts);
+*/
 
-/*
+    /*
+    // gamma < 1.0 makes low probabilities more visible if distribution is peaky
+    render_probability_image_216_from_counts(&dice_types, &counts, "prob_216.png", 0.6);
+    println!("Saved prob_216.png");
+
+
 
     let dice_types = [default_die.clone()];
     let counts = [6u8];
     evaluate_and_print(&dice_types, &counts);
+    // gamma < 1.0 makes low probabilities more visible if distribution is peaky
+    render_probability_image_216_from_counts(&dice_types, &counts, "prob_216_fair.png", 1.0);
+    println!("Saved prob_216.png");
+  */
 
-    let dice_types = [default_die.clone(), Die::devil()];
-    let counts = [5u8, 1u8];
-    evaluate_and_print(&dice_types, &counts);
-*/
 
 }
